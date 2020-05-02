@@ -1,0 +1,183 @@
+<ManagementPack ContentReadable="true" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <Manifest>
+    <Identity>
+      <ID>Example.EventAndScript</ID>
+      <Version>1.0.0.6</Version>
+    </Identity>
+    <Name>Example.EventAndScript</Name>
+    <References>
+      <Reference Alias="SC">
+        <ID>Microsoft.SystemCenter.Library</ID>
+        <Version>6.1.7221.0</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+      <Reference Alias="Windows">
+        <ID>Microsoft.Windows.Library</ID>
+        <Version>6.1.7221.0</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+      <Reference Alias="Health">
+        <ID>System.Health.Library</ID>
+        <Version>6.1.7221.0</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+      <Reference Alias="System">
+        <ID>System.Library</ID>
+        <Version>6.1.7221.0</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+    </References>
+  </Manifest>
+  <TypeDefinitions>
+    <ModuleTypes>
+      <DataSourceModuleType ID="Example.EventAndScript.DS" Accessibility="Internal" Batching="false">
+        <Configuration>
+          <xsd:element minOccurs="1" name="LogName" type="xsd:string" />
+          <xsd:element minOccurs="1" name="EventID" type="xsd:integer" />
+          <xsd:element minOccurs="1" name="EventSource" type="xsd:string" />
+        </Configuration>
+        <ModuleImplementation Isolation="Any">
+          <Composite>
+            <MemberModules>
+              <DataSource ID="EventDS" TypeID="Windows!Microsoft.Windows.EventProvider">
+                <ComputerName />
+                <LogName>$Config/LogName$</LogName>
+                <Expression>
+                  <And>
+                    <Expression>
+                      <SimpleExpression>
+                        <ValueExpression>
+                          <XPathQuery Type="UnsignedInteger">EventDisplayNumber</XPathQuery>
+                        </ValueExpression>
+                        <Operator>Equal</Operator>
+                        <ValueExpression>
+                          <Value Type="UnsignedInteger">$Config/EventID$</Value>
+                        </ValueExpression>
+                      </SimpleExpression>
+                    </Expression>
+                    <Expression>
+                      <SimpleExpression>
+                        <ValueExpression>
+                          <XPathQuery Type="String">PublisherName</XPathQuery>
+                        </ValueExpression>
+                        <Operator>Equal</Operator>
+                        <ValueExpression>
+                          <Value Type="String">$Config/EventSource$</Value>
+                        </ValueExpression>
+                      </SimpleExpression>
+                    </Expression>
+                  </And>
+                </Expression>
+              </DataSource>
+              <ProbeAction ID="ScriptDS" TypeID="Windows!Microsoft.Windows.ScriptPropertyBagProbe">
+                <ScriptName>EventParse.vbs</ScriptName>
+                <Arguments>"$Data/Params/Param[1]$"</Arguments>
+                <ScriptBody><![CDATA[
+'''''''''''''''''''''''''''''''
+'
+'  Basic SCOM vbscript to accept event data and parse/modify it for ouput via propertybag
+'
+'''''''''''''''''''''''''''''''				
+Option Explicit
+Dim oAPI, oBag, sParam1, StartTime, EndTime, ScriptTime, CompNameArr, CompName
+
+'Capture script start time
+  StartTime = Now
+
+'Gather the argument passed to the scriptand set to variable
+sParam1 = WScript.Arguments(0)
+
+'Split the event data into multiple delimited strings in an array
+CompNameArr = split(sParam1," ")
+'Assume the FQDN is always the 2rd "word" in the event data
+CompName = CompNameArr(1)
+
+'Load the SCOM script API and propertybag
+Set oAPI = CreateObject("MOM.ScriptAPI")
+Set oBag = oAPI.CreatePropertyBag()
+
+'Add the CompName into a propertybag
+oBag.AddValue "CompName", CompName
+oBag.AddValue "EventDescription", SParam1
+
+'Return the bag for output
+oAPI.Return(oBag)
+
+'Capture script runtime
+  EndTime = Now
+  ScriptTime = DateDiff("s", StartTime, EndTime)
+  
+'Log event with script outputs and runtime
+Call oAPI.LogScriptEvent("EventParse.vbs from Example.EventAndScript.DS", 9877, 0, "Event Data Passed to script = " & sParam1 & " -- Output after parsing for CompName = " & CompName & " -- Script Execution Completed in " & ScriptTime & " seconds")
+
+Wscript.Quit  
+				]]></ScriptBody>
+                <TimeoutSeconds>30</TimeoutSeconds>
+              </ProbeAction>
+            </MemberModules>
+            <Composition>
+              <Node ID="ScriptDS">
+                <Node ID="EventDS" />
+              </Node>
+            </Composition>
+          </Composite>
+        </ModuleImplementation>
+        <OutputType>System!System.PropertyBagData</OutputType>
+      </DataSourceModuleType>
+    </ModuleTypes>
+  </TypeDefinitions>
+  <Monitoring>
+    <Rules>
+      <Rule ID="Example.EventAndScript.Rule" Enabled="true" Target="Windows!Microsoft.Windows.Server.OperatingSystem" ConfirmDelivery="true" Remotable="true" Priority="Normal" DiscardLevel="100">
+        <Category>Custom</Category>
+        <DataSources>
+          <DataSource ID="DS" TypeID="Example.EventAndScript.DS">
+		    <LogName>Application</LogName>
+            <EventID>888</EventID>
+            <EventSource>TEST</EventSource>
+          </DataSource>			
+        </DataSources>
+        <WriteActions>
+          <WriteAction ID="Alert" TypeID="Health!System.Health.GenerateAlert">
+            <Priority>1</Priority>
+            <Severity>2</Severity>
+            <AlertMessageId>$MPElement[Name="Example.EventAndScript.Event888.rule.AlertMessage"]$</AlertMessageId>
+            <AlertParameters>
+              <AlertParameter1>$Data/Property[@Name='EventDescription']$</AlertParameter1>
+              <AlertParameter2>$Data/Property[@Name='CompName']$</AlertParameter2>			  
+            </AlertParameters>			
+			<Custom1>$Data/Property[@Name='CompName']$</Custom1>
+          </WriteAction>
+        </WriteActions>
+      </Rule>
+    </Rules>
+  </Monitoring>
+  <Presentation>
+    <StringResources>
+      <StringResource ID="Example.EventAndScript.Event888.rule.AlertMessage" />
+    </StringResources>
+  </Presentation>
+  <LanguagePacks>
+    <LanguagePack ID="ENU" IsDefault="true">
+      <DisplayStrings>
+        <DisplayString ElementID="Example.EventAndScript">
+          <Name>Example Event And Script Datasource Management Pack</Name>
+        </DisplayString>
+        <DisplayString ElementID="Example.EventAndScript.Event888.rule.AlertMessage">
+          <Name>Event 888 Occurred</Name>
+          <Description>Event Description: {0}
+
+Computer Name from Event:  {1}	  
+		  </Description>
+        </DisplayString>
+        <DisplayString ElementID="Example.EventAndScript.DS">
+          <Name>Example Event And Script DS</Name>
+        </DisplayString>
+        <DisplayString ElementID="Example.EventAndScript.Rule">
+          <Name>Event then Script Example Rule</Name>
+          <Description />
+        </DisplayString>
+      </DisplayStrings>
+    </LanguagePack>
+  </LanguagePacks>
+</ManagementPack>
